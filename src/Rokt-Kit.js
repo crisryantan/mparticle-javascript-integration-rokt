@@ -560,6 +560,13 @@ var constructor = function () {
 
     function _sendEventStream(event) {
         if (window.Rokt && typeof window.Rokt.__event_stream__ === 'function') {
+            var enrichedEvent = _enrichEvent(event);
+            console.log('[MP-SESSION-DEBUG] Kit._sendEventStream', {
+                hasRokt: true,
+                SessionId: enrichedEvent.SessionId,
+                EventName: enrichedEvent.EventName,
+                queueLength: self.eventStreamQueue.length,
+            });
             if (self.eventStreamQueue.length) {
                 var queuedEvents = self.eventStreamQueue;
                 self.eventStreamQueue = [];
@@ -567,7 +574,7 @@ var constructor = function () {
                     window.Rokt.__event_stream__(_enrichEvent(queuedEvents[i]));
                 }
             }
-            window.Rokt.__event_stream__(_enrichEvent(event));
+            window.Rokt.__event_stream__(enrichedEvent);
         } else {
             self.eventStreamQueue.push(event);
         }
@@ -606,12 +613,18 @@ var constructor = function () {
     }
 
     function attachLauncher(accountId, launcherOptions) {
-        var mpSessionId =
-            window.mParticle &&
-            window.mParticle.sessionManager &&
-            typeof window.mParticle.sessionManager.getSession === 'function'
-                ? window.mParticle.sessionManager.getSession()
-                : undefined;
+        var hasSessionManager = !!(window.mParticle && window.mParticle.sessionManager);
+        var hasGetSession = hasSessionManager && typeof window.mParticle.sessionManager.getSession === 'function';
+        var mpSessionId = hasGetSession
+            ? window.mParticle.sessionManager.getSession()
+            : undefined;
+
+        console.log('[MP-SESSION-DEBUG] Kit.attachLauncher', {
+            hasSessionManager: hasSessionManager,
+            hasGetSession: hasGetSession,
+            mpSessionId: mpSessionId,
+            accountId: accountId,
+        });
 
         var options = mergeObjects(
             {
@@ -620,6 +633,8 @@ var constructor = function () {
             launcherOptions || {},
             mpSessionId ? { mpSessionId: mpSessionId } : {}
         );
+
+        console.log('[MP-SESSION-DEBUG] Kit.attachLauncher options.mpSessionId=' + options.mpSessionId);
 
         if (isPartnerInLocalLauncherTestGroup()) {
             var localLauncher = window.Rokt.createLocalLauncher(options);
