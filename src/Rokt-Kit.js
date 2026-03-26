@@ -553,8 +553,16 @@ var constructor = function () {
     }
 
     function _enrichEvent(event) {
+        var sessionId =
+            window.mParticle &&
+            window.mParticle.sessionManager &&
+            typeof window.mParticle.sessionManager.getSession === 'function'
+                ? window.mParticle.sessionManager.getSession()
+                : undefined;
+
         return mergeObjects({}, event, {
             UserAttributes: self.userAttributes,
+            SessionId: sessionId,
         });
     }
 
