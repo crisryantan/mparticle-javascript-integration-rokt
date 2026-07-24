@@ -258,7 +258,6 @@ const ErrorCodes = {
   UNKNOWN_ERROR: 'UNKNOWN_ERROR',
   UNHANDLED_EXCEPTION: 'UNHANDLED_EXCEPTION',
   IDENTITY_REQUEST: 'IDENTITY_REQUEST',
-  LOG_DELIVERY_FAILURE: 'LOG_DELIVERY_FAILURE',
 } as const;
 
 const WSDKErrorSeverity = {
@@ -570,14 +569,7 @@ class ReportingTransport {
     this._isEnabled = _isDebugModeEnabled() || isLoggingEnabled;
   }
 
-  send(
-    url: string,
-    severity: string,
-    msg: string,
-    code?: string,
-    stackTrace?: string,
-    onError?: (error: DeliveryError) => void,
-  ): void {
+  send(url: string, severity: string, msg: string, code?: string, stackTrace?: string): void {
     if (!this._isEnabled || this._rateLimiter.incrementAndCheck(severity)) {
       return;
     }
@@ -617,8 +609,7 @@ class ReportingTransport {
         body: JSON.stringify(logRequest),
       })
         .then((response: Response) => {
-          // fetch only rejects on network failures; an HTTP 5xx resolves with
-          // ok === false. Surface server-side failures so they are not swallowed.
+          // fetch only rejects on network failures; an HTTP 5xx resolves with ok === false.
           if (!response.ok) {
             const serverError: DeliveryError = new Error('HTTP ' + response.status + ' from log endpoint');
             serverError.statusCode = response.status;
@@ -627,11 +618,9 @@ class ReportingTransport {
         })
         .catch((error: DeliveryError) => {
           console.error('ReportingTransport: Failed to send log', error);
-          if (onError) onError(error);
         });
     } catch (error) {
       console.error('ReportingTransport: Failed to send log', error);
-      if (onError) onError(error as DeliveryError);
     }
   }
 }
@@ -661,11 +650,9 @@ class ErrorReportingService {
 class LoggingService {
   private _transport: ReportingTransport;
   private _loggingUrl: string;
-  private _errorReportingService: { report: (e: ErrorReport) => void };
 
   constructor(
     config: ReportingConfig,
-    errorReportingService: { report: (e: ErrorReport) => void },
     integrationName: string | null | undefined,
     launcherInstanceGuid?: string,
     accountId?: string | null,
@@ -673,31 +660,13 @@ class LoggingService {
   ) {
     this._transport = new ReportingTransport(config, integrationName, launcherInstanceGuid, accountId, rateLimiter);
     this._loggingUrl = generateReportingUrl(config?.loggingUrl, config?.integrationDomain, LOGGING_ENDPOINT);
-    this._errorReportingService = errorReportingService;
   }
 
   log(entry: LogEntry | null | undefined): void {
     if (!entry) return;
-    this._transport.send(
-      this._loggingUrl,
-      WSDKErrorSeverity.INFO,
-      entry.message,
-      entry.code,
-      undefined,
-      (error: DeliveryError) => {
-        if (this._errorReportingService) {
-          // A failed log POST is not itself an SDK error. Network-level failures
-          // (ad-blockers, offline, CORS) are client-side noise and reported as a
-          // WARNING; only a server-side non-2xx response stays at ERROR severity.
-          const isServerSide = typeof error.statusCode === 'number';
-          this._errorReportingService.report({
-            message: 'LoggingService: Failed to send log: ' + error.message,
-            code: ErrorCodes.LOG_DELIVERY_FAILURE,
-            severity: isServerSide ? WSDKErrorSeverity.ERROR : WSDKErrorSeverity.WARNING,
-          });
-        }
-      },
-    );
+    // Fire-and-forget: a failed log POST isn't worth reporting, and reporting a
+    // rate-limit (429) would amplify load on the endpoint already shedding it.
+    this._transport.send(this._loggingUrl, WSDKErrorSeverity.INFO, entry.message, entry.code);
   }
 }
 
@@ -1082,7 +1051,6 @@ class RoktKit implements KitInterface {
     );
     const loggingService = new LoggingService(
       reportingConfig,
-      errorReportingService,
       this.integrationName,
       window.__rokt_li_guid__,
       kitSettings.accountId,
